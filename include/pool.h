@@ -37,6 +37,8 @@ private:
   }
 
 public:
+  using value_type = T;
+  
   Pool() = default;
   Pool(std::string_view name, usize capacity) {
     this->name = name;
