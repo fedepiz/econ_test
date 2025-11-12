@@ -4,6 +4,8 @@
 #include <cstring>
 namespace arena {
 
+using Page = Arena::Page;
+
 static inline
 bool HasFreeSpace(const Page* page, usize num_bytes) {
   return page && (page->capacity - page->size) >= num_bytes;
@@ -44,6 +46,10 @@ void Arena::Reset() {
     page = next;
   }
   this->capacity = 0;
+}
+
+Arena::~Arena() {
+  this->Reset();
 }
 }
 

@@ -1,4 +1,8 @@
 // Raylib
+#include "arena.h"
+#include "raylib.h"
+#include <chrono>
+#include <iostream>
 #include <raylib.h>
 // Imgui
 #include <imgui.h>
@@ -15,26 +19,25 @@ struct Gui {
   ImFont* font{nullptr};
 };
 
-static inline
-void DrawGui(Gui& gui) {
-    rlImGuiBegin();
-    ImGui::PushFont(gui.font, 24.0f);
+static inline void DrawGui(Gui& gui) {
+  rlImGuiBegin();
+  ImGui::PushFont(gui.font, 24.0f);
 
-    if (gui.window) {
-      std::stringstream ss;
-      ImGui::Begin("Test", &gui.window, ImGuiWindowFlags_NoCollapse);
-      ImGui::Text("Hello!");
+  if (gui.window) {
+    std::stringstream ss;
+    ImGui::Begin("Test", &gui.window, ImGuiWindowFlags_NoCollapse);
+    ImGui::Text("Hello!");
 
-      ImGui::Text("FPS: %d", GetFPS());
-      
-      if (ImGui::Button("Click me!")) {
-        // gui.window = false;
-      }
-      ImGui::End();
+    ImGui::Text("FPS: %d", GetFPS());
+
+    if (ImGui::Button("Click me!")) {
+      // gui.window = false;
     }
+    ImGui::End();
+  }
 
-    ImGui::PopFont();
-    rlImGuiEnd();
+  ImGui::PopFont();
+  rlImGuiEnd();
 }
 
 struct HSV {
@@ -49,12 +52,9 @@ struct HSV {
   }
 };
 
-ImColor ToImgui(const HSV& hsv) {
-  return ImColor::HSV(hsv.h, hsv.s, hsv.v);
-}
+ImColor ToImgui(const HSV& hsv) { return ImColor::HSV(hsv.h, hsv.s, hsv.v); }
 
-static inline
-void SetupGui(Gui& gui) {
+static inline void SetupGui(Gui& gui) {
   gui.window = true;
 
   auto& io = ImGui::GetIO();
@@ -63,7 +63,7 @@ void SetupGui(Gui& gui) {
   style.WindowRounding = 8.0f;
   style.FrameRounding = 8.0f;
 
-  HSV base = { 0.1, 0.2, 0.4 };
+  HSV base = {0.1, 0.2, 0.4};
   style.Colors[ImGuiCol_Button] = ToImgui(base);
   style.Colors[ImGuiCol_ButtonHovered] = ToImgui(base.IncreaseValue(0.2));
   style.Colors[ImGuiCol_ButtonActive] = ToImgui(base.IncreaseValue(0.4));
@@ -71,15 +71,16 @@ void SetupGui(Gui& gui) {
   style.Colors[ImGuiCol_TitleBgActive] = ToImgui(base);
 }
 
+
 int main() {
+  SetConfigFlags(FLAG_VSYNC_HINT);
   InitWindow(1600, 900, "Econ Test");
   rlImGuiSetup(true);
 
   Gui gui;
   SetupGui(gui);
 
-
-  // SetTargetFPS(60);
+  SetTargetFPS(GetMonitorRefreshRate(GetCurrentMonitor()));
 
   while (!WindowShouldClose()) {
     // Input

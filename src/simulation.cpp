@@ -1,13 +1,15 @@
+#include <array>
 #include <deque>
-#include <simulation.h>
 
 #include <initializer_list>
 #include <iostream>
-#include <pool.h>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <pool.h>
+#include <simulation.h>
 
 template <typename T, typename V> class Vector {
   std::vector<V> entries;
@@ -343,9 +345,9 @@ static void SimulationInit(Sim& sim) {
   sim.locations = std::move(Locations("Locations", 1024));
 
   {
-    auto tag_name = TagAndName {
-      .tag = "rome",
-      .name = "Rome",
+    auto tag_name = TagAndName{
+        .tag = "rome",
+        .name = "Rome",
     };
     assume_valid(LocationInit(sim, tag_name));
   }
@@ -369,8 +371,10 @@ static inline void SimulationTick(
   }
 
   for (const auto& pop : sim.pops) {
-    if (!IsValid(pop)) continue;
-    std::cout << pop.type->name << "(" << pop.size << ")" << " in " << pop.location->name << std::endl;
+    if (!IsValid(pop))
+      continue;
+    std::cout << pop.type->name << "(" << pop.size << ")" << " in "
+              << pop.location->name << std::endl;
   }
 }
 
@@ -395,5 +399,16 @@ void DeInit(SimulationModule* module) {
 void Tick(SimulationModule& module, const TickRequest& request) {
   std::string test;
   SimulationTick(module.sim, request);
+}
+} // namespace simulation
+
+namespace simulation {
+namespace view {
+using namespace arena;
+
+void View(Arena& arena, const SimulationModule& module, ViewRequest& req) {
+  
+}
+
 }
 } // namespace simulation
