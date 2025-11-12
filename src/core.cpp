@@ -46,6 +46,7 @@ void Arena::Reset() {
     page = next;
   }
   this->capacity = 0;
+  this->page_chain = nullptr;
 }
 
 Arena::~Arena() {

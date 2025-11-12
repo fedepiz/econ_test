@@ -117,7 +117,7 @@ public:
     this->head->count++;
   }
 
-  Iterator Iterate() {
+  Iterator Iterate() const {
     return Iterator(&this->head->chunk); 
   }
 

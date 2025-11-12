@@ -24,7 +24,6 @@ target_link_libraries(Main PUBLIC raylib)
 
 if (APPLE)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -framework CoreVideo -framework Cocoa -framework IOKit")
-  # target_link_directories(Main PRIVATE deps/libs/arm_64)
-  # target_link_libraries(Main PRIVATE glfw3 raylib)
+  target_link_directories(Main PRIVATE deps/libs/arm_64)
   target_link_libraries(Main PRIVATE glfw3)
 endif()

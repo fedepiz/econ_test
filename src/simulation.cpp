@@ -1,8 +1,7 @@
 #include <array>
-#include <deque>
-
 #include <initializer_list>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -11,36 +10,8 @@
 #include <pool.h>
 #include <simulation.h>
 
-template <typename T, typename V> class Vector {
-  std::vector<V> entries;
-
-public:
-  Vector() = default;
-
-  void Init(const std::vector<T>& definition, V value) {
-    this->entries.resize(definition.size(), value);
-  }
-
-  void Init(const std::vector<T>& definition) {
-    this->entries.resize(definition.size(), {});
-  }
-
-  V& operator[](T::Id id) { return (*this)[id.idx]; }
-
-  const V& operator[](T::Id id) const { return (*this)[id.idx]; }
-
-  V& operator[](usize idx) {
-    assert(idx < this->entries.size());
-    return this->entries[idx];
-  }
-
-  const V& operator[](usize idx) const {
-    assert(idx < this->entries.size());
-    return this->entries[idx];
-  }
-};
-
-template <typename K> using NumVector = Vector<K, f64>;
+namespace simulation {
+using namespace arena;
 
 template <typename K>
 NumVector<K> VectorInit(const std::vector<K>& definition) {
@@ -89,115 +60,21 @@ void SetVectorValues(NumVector<T>& vector, std::vector<T>& definitions,
   }
 }
 
-struct Id {
-  usize idx{0};
-};
 
-struct GoodType {
-  using Id = Id;
-  Id id;
-  std::string tag;
-  std::string name;
-  f64 price;
-};
-
-using GoodTypes = std::vector<GoodType>;
-
-struct PopType {
-  Id id;
-  std::string tag;
-  std::string name;
-  NumVector<GoodType> demand;
-};
-
-using PopTypes = std::vector<PopType>;
-
-struct BuildingType {
-  Id id;
-  std::string tag;
-  std::string name;
-  NumVector<GoodType> inputs;
-  NumVector<GoodType> output;
-};
-
-using BuildingTypes = std::vector<BuildingType>;
-
-struct Location;
-
-struct Pop {
-  const PopType* type{nullptr};
-  i64 size{0};
-
-  // Location of pop
-  Location* location{nullptr};
-
-  // Pop at location linked list
-  Pop* location_chain_next{nullptr};
-};
-
-using Pops = Pool<Pop>;
-
-struct Building {
-  const BuildingType* type{nullptr};
-  i64 size{0};
-
-  // Location of pop
-  Location* location{nullptr};
-
-  // Pop at location linked list
-  Pop* location_chain_next{nullptr};
-};
-
-using Buildings = Pool<Building>;
-
-std::string_view DEFAULT_STRING = "UNSET";
-
-struct Location {
-  std::string_view tag{DEFAULT_STRING};
-  std::string_view name{DEFAULT_STRING};
-  bool is_valid{false};
-};
-
-using Locations = Pool<Location>;
-
-struct Country {
-  std::string_view tag{DEFAULT_STRING};
-  std::string_view name{DEFAULT_STRING};
-  bool is_valid{false};
-};
-
-using Countries = Pool<Country>;
-
-bool IsValid(const Pop& pop) { return pop.type != nullptr; }
-bool IsValid(const Building& building) { return building.type != nullptr; }
-bool IsValid(const Location& location) { return location.is_valid; }
-bool IsValid(const Country& country) { return country.is_valid; }
-
-struct Date {
-  u64 epoch{0};
-};
-
-using Strings = std::deque<std::string>;
-
-std::string_view StringAlloc(Strings& container, std::string&& data) {
-  container.push_back(std::move(data));
-  return container.back();
+template <typename T> unique_vector<T> MakeUniqueVec() {
+  return std::make_unique<std::vector<T>>();
 }
 
-struct Sim {
-  Date date;
-  // Common semi-static data
-  GoodTypes good_types;
-  PopTypes pop_types;
-  BuildingTypes building_types;
-  Strings strings;
-  // Entity Pools
-  Pops pops;
-  Buildings buildings;
+static bool IsValid(const Pop& pop) { return pop.generation % 2 == 1; }
+static bool IsValid(const Building& building) { return building.generation % 2 == 1; }
+static bool IsValid(const Location& location) { return location.generation % 2 == 1; }
+static bool IsValid(const Country& country) { return country.generation % 2 == 1; }
 
-  Locations locations;
-  Countries country;
-};
+
+const char* StringAlloc(Strings& container, std::string&& data) {
+  container.push_back(std::move(data));
+  return container.back().c_str();
+}
 
 static inline const PopType* LookupPopType(
     PopTypes& types, std::string_view tag) {
@@ -228,8 +105,12 @@ static inline Pop* PopInit(Sim& sim, std::string_view type_tag,
 
   auto& pop = sim.pops.Allocate();
   pop.type = pop_type;
-  pop.location = location;
   pop.size = size;
+
+  // Add the pop to the list of pops at location
+  pop.location = location;
+  location->pops_at_location->push_back(&pop);
+
   return &pop;
 }
 
@@ -238,15 +119,26 @@ struct TagAndName {
   std::string_view name{"UNNAMED"};
 };
 
-static inline Location* LocationInit(Sim& sim, TagAndName tag_name) {
+static inline Location* LocationInit(Sim& sim, TagAndName tag_name, V2 coords) {
   auto& location = sim.locations.Allocate();
-
+  location.generation++;
   location.tag = StringAlloc(sim.strings, std::string(tag_name.tag));
   location.name = StringAlloc(sim.strings, std::string(tag_name.name));
-
-  location.is_valid = true;
+  location.coords = coords;
+  location.pops_at_location = MakeUniqueVec<Pop*>();
+  location.buildings_at_location = MakeUniqueVec<Building*>();
 
   return &location;
+}
+
+static inline Country* CountryInit(Sim& sim, TagAndName tag_name, RGB color) {
+  auto& country = sim.countries.Allocate();
+  country.generation++;
+  country.tag = StringAlloc(sim.strings, std::string(tag_name.tag));
+  country.name = StringAlloc(sim.strings, std::string(tag_name.name));
+  country.color = color;
+  country.owned_locations = MakeUniqueVec<Location*>();
+  return &country;
 }
 
 namespace init_sim {
@@ -334,22 +226,41 @@ template <typename T> static inline T& assume_valid(T* ptr) {
   return *ptr;
 }
 
-static void SimulationInit(Sim& sim) {
+static void ChangeLocationOwner(Sim& sim, Country* country, Location* location) {
+  assert(!location->owner_country);
+  country->owned_locations->push_back(location);
+  location->owner_country = country;
+}
+
+void Init(Sim& sim) {
   using namespace init_sim;
   InitGoodTypes(sim);
   InitPopTypes(sim);
 
   sim.pops = std::move(Pops("Pops", 2048));
   sim.buildings = std::move(Buildings("Buildings", 2048));
-  sim.country = std::move(Countries("Countries", 256));
+  sim.countries = std::move(Countries("Countries", 256));
   sim.locations = std::move(Locations("Locations", 1024));
+
+  {
+    auto tag_name = TagAndName{
+        .tag = "italy",
+        .name = "Italy",
+    };
+    auto color = RGB { 40, 255, 40 };
+    auto* country = CountryInit(sim, tag_name, color);
+    assume_valid(country);
+    sim.player.country = country;
+  }
 
   {
     auto tag_name = TagAndName{
         .tag = "rome",
         .name = "Rome",
     };
-    assume_valid(LocationInit(sim, tag_name));
+    auto* location = LocationInit(sim, tag_name, { 0.0, 0.0 });
+    assume_valid(location);
+    ChangeLocationOwner(sim, sim.player.country, location);
   }
 
   {
@@ -364,7 +275,7 @@ static inline void AdvanceDate(Date& date) {
   assert(date.epoch > old_date);
 }
 
-static inline void SimulationTick(
+void Tick(
     Sim& sim, const simulation::TickRequest& request) {
   if (request.advance_time) {
     AdvanceDate(sim.date);
@@ -375,40 +286,32 @@ static inline void SimulationTick(
       continue;
     std::cout << pop.type->name << "(" << pop.size << ")" << " in "
               << pop.location->name << std::endl;
+ }
+}
+
+Stream<MapItem> ViewMapItems(const Sim& sim, Arena& arena) {
+  auto stream = arena::Stream<MapItem>(&arena);
+
+  for (const auto& location : sim.locations) {
+    if (!IsValid(location)) { continue; }
+    MapItem item;
+    if (location.owner_country) {
+      item.color = location.owner_country->color;
+    }
+    item.id = EntityId {
+      .kind = EntityIdKind::Location,
+      .handle = (void*)&location,
+      .generation = location.generation,
+    };
+    item.name = location.name;
+    item.coords = location.coords;
+    item.size = 2.0f;
+    stream.Push(item);
   }
+
+  return stream;
 }
 
-namespace simulation {
-struct SimulationModule {
-  Sim sim;
-};
-
-SimulationModule* Init() {
-  auto module = new SimulationModule;
-  SimulationInit(module->sim);
-  return module;
-}
-
-void DeInit(SimulationModule* module) {
-  if (!module) {
-    return;
-  }
-  module->sim = {};
-}
-
-void Tick(SimulationModule& module, const TickRequest& request) {
-  std::string test;
-  SimulationTick(module.sim, request);
-}
-} // namespace simulation
-
-namespace simulation {
-namespace view {
-using namespace arena;
-
-void View(Arena& arena, const SimulationModule& module, ViewRequest& req) {
-  
-}
 
 }
-} // namespace simulation
+
