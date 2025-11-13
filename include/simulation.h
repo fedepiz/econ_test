@@ -3,12 +3,14 @@
 #include <arena.h>
 #include <pool.h>
 
+#include <sstream>
 #include <vector>
 #include <deque>
 #include <string>
 #include <vector>
 
 namespace simulation {
+using namespace arena;
 
 template <typename T> using unique_vector = std::unique_ptr<std::vector<T>>;
 
@@ -178,6 +180,7 @@ void Tick(Sim& sim, const TickRequest& req);
 
 enum class EntityIdKind {
   Location,
+  Building,
   INVALID,
 };
 
@@ -190,6 +193,13 @@ struct EntityId {
     return {};
   }
 
+  private:
+    template <typename T>
+    auto GenerationOf() const {
+      return ((const T*)this->handle)->generation;
+    }
+  public:
+
   bool IsValid() const {
     if (this->kind == EntityIdKind::INVALID || !this->handle) {
       return false;
@@ -199,12 +209,12 @@ struct EntityId {
     u64 generation = 0;
     switch (this->kind) {
       case EntityIdKind::Location:
-        generation = ((const Location*)this->handle)->generation;
+        generation = GenerationOf<Location>();
         break;
+      case simulation::EntityIdKind::Building:
+        generation = GenerationOf<Building>();
       case EntityIdKind::INVALID:
         break;
-      default:
-        assert(false);
     }
     return this->generation == generation;
   }
@@ -220,7 +230,87 @@ struct MapItem {
   RGB color;
 };
 
-arena::Stream<MapItem> ViewMapItems(const Sim& sim, arena::Arena& arena);
+arena::List<MapItem> ViewMapItems(const Sim& sim, arena::Arena& arena);
 
+enum class Field {
+  INVALID,
+  Name,
+  Size,
+  Pops,
+  Buildings,
+  Country,
+};
+
+template <typename T>
+class Fields {
+private:
+  struct Entry {
+    Field field{Field::INVALID};
+    T payload;
+  };
+
+  List<Entry> fields;
+
+  Entry* FindEntry(Field field) const {
+    auto it = fields.Iterate();
+    while (auto* entry = it.Next()) {
+      if (entry->field == field) {
+        return entry;
+      }
+    }
+    return nullptr;
+  }
+
+  static const usize CAPACITY = 32;
+
+public:
+  Fields() = default;
+  Fields(Arena* arena) : fields(arena, CAPACITY) {}
+
+
+  bool Has(Field field) const {
+    return this->FindEntry(field);
+  }
+
+  T Get(Field field) const {
+    const auto* entry = this->FindEntry(field);
+    if (!entry) {
+      return {};
+    }
+    return entry->payload;
+  }
+
+  const T* TryGet(Field field) const {
+    const auto* entry = this->FindEntry(field);
+    if (!entry) {
+      return nullptr;
+    }
+    return &entry->payload;
+  }
+
+  void Set(Field field, T value) {
+    if (auto* entry = this->FindEntry(field)) {
+      entry->payload = std::move(value);
+    } else {
+      this->fields.Push(Entry { .field = field, .payload = value });
+    }
+  }
+};
+
+struct ExtractCtx {
+  const Sim& sim;
+  Arena& arena;
+  std::stringstream ss;
+};
+
+struct Object {
+  EntityId id;
+  Fields<const char*> strings;
+  Fields<List<Object*>> lists;
+
+  Object(Arena* arena): strings(arena), lists(arena) {}
+};
+
+Object* Extract(ExtractCtx& ctx, EntityId id);
 } // namespace simulation
 #endif

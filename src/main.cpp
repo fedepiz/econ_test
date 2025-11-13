@@ -1,6 +1,5 @@
 // Raylib
 #include "arena.h"
-#include "imgui_internal.h"
 #include "raylib.h"
 #include <raylib.h>
 // Imgui
@@ -10,59 +9,137 @@
 // Simulation
 #include <core.h>
 #include <simulation.h>
-// Other
-#include <sstream>
 
 using namespace arena;
 
+template <typename T>
+struct Change {
+  bool is_changed{false};
+  T value;
+
+  void Set(T value) {
+    this->value = std::move(value);
+    this->is_changed = true;
+  }
+};
+
+struct Actions {
+  bool next_day{false};
+
+  Change<simulation::EntityId> selection;
+};
 struct Gui {
   bool window{false};
   ImFont* font{nullptr};
+  Actions actions;
 };
 
-static inline void DrawGui(Gui& gui, const simulation::Sim& sim,
-                           simulation::EntityId selected_id) {
+static inline void DrawGui(Gui& gui, const simulation::Sim& sim, Arena& arena,
+    simulation::EntityId selected_id) {
   using namespace simulation;
+  gui.actions = {};
 
   rlImGuiBegin();
   ImGui::PushFont(gui.font, 24.0f);
 
   if (selected_id.IsValid()) {
-
-    struct Object {
-      const char* name{nullptr};
+    auto ctx = ExtractCtx{
+        .arena = arena,
+        .sim = sim,
     };
-        
-    Object obj;
-    switch (selected_id.kind) {
-      case EntityIdKind::Location: {
-          const auto* location = (Location*)selected_id.handle;
-          obj.name = location->name;
-        break;
+    if (const auto* object = Extract(ctx, selected_id)) {
+      bool window_is_open = true;
+      ImGui::Begin("Selected Entity", &window_is_open);
+      // Overview table
+      if (ImGui::BeginTable("overview_table", 2)) {
+        auto kv_label = [&](const char* label, auto field) {
+          if (auto* text = object->strings.TryGet(field)) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", label);
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", *text);
+          }
+        };
+        auto kv_link = [&](const char* label, auto field) {
+          if (auto* text = object->strings.TryGet(field)) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", label);
+            ImGui::TableNextColumn();
+            ImGui::TextLink( *text);
+          }
+        };
+
+        kv_label("Name", Field::Name);
+        kv_label("Size", Field::Size);
+        kv_link("Country", Field::Country);
+
+        ImGui::EndTable();
       }
-      default:
-        assert(false);
+
+      // Pop table
+      if (auto* list = object->lists.TryGet(Field::Pops)) {
+        ImGui::Separator();
+        ImGui::Text("Pops");
+        if (ImGui::BeginTable("pop_table", 2)) {
+          if (list->IsEmpty()) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("No pops...");
+          }
+          auto it = list->Iterate();
+          while (auto* entry_it = it.Next()) {
+            auto* obj = *entry_it;
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            if (ImGui::TextLink(obj->strings.Get(Field::Name))) {
+            }
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", obj->strings.Get(Field::Size));
+          }
+          ImGui::EndTable();
+        }
+      }
+      // Buildings table
+      if (auto* list = object->lists.TryGet(Field::Buildings)) {
+        ImGui::Separator();
+        ImGui::Text("Buildings");
+        if (ImGui::BeginTable("building_table", 2)) {
+          if (list->IsEmpty()) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("No buildings...");
+          }
+          auto it = list->Iterate();
+          while (auto* entry_it = it.Next()) {
+            auto* obj = *entry_it;
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            if (ImGui::TextLink(obj->strings.Get(Field::Name))) {
+              gui.actions.selection.Set(obj->id);
+            }
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", obj->strings.Get(Field::Size));
+          }
+          ImGui::EndTable();
+        }
+      }
+      ImGui::End();
+
+      if (!window_is_open) {
+        gui.actions.selection.Set({});
+      }
     }
-    
-    ImGui::Begin("Selected Entity");
-    ImGui::BeginTable("overview_table", 2);
-    ImGui::TableNextRow();
-    ImGui::TableNextColumn();
-    ImGui::Text("Name");
-    ImGui::TableNextColumn();
-    ImGui::Text("%s", obj.name);
-    ImGui::EndTable();
-    ImGui::End();
   }
 
   if (gui.window) {
     ImGui::Begin("Test", &gui.window, ImGuiWindowFlags_NoCollapse);
-    ImGui::Text("Hello!");
 
     ImGui::Text("FPS: %d", GetFPS());
 
-    if (ImGui::Button("Click me!")) {
-      gui.window = false;
+    if (ImGui::Button("Advance time")) {
+      gui.actions.next_day = true;
     }
 
     ImGui::End();
@@ -98,7 +175,7 @@ static inline void Draw(Arena& arena, Board& board, const simulation::Sim& sim,
     Rectangle bounds;
     simulation::EntityId id;
   };
-  auto click_boxes = Stream<ClickBox>(&arena);
+  auto click_boxes = List<ClickBox>(&arena);
 
   {
     BeginMode2D(board.camera);
@@ -121,13 +198,14 @@ static inline void Draw(Arena& arena, Board& board, const simulation::Sim& sim,
       }
       DrawRectangleLinesEx(bounds, 4.0, border_color);
 
-      click_boxes.Push({ bounds, item->id });
+      click_boxes.Push({bounds, item->id});
     }
 
     EndMode2D();
   }
 
-  if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && !ImGui::GetIO().WantCaptureMouse) {
+  if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) &&
+      !ImGui::GetIO().WantCaptureMouse) {
     auto screen_pos = GetMousePosition();
     auto world_pos = GetScreenToWorld2D(screen_pos, board.camera);
 
@@ -212,11 +290,18 @@ int main() {
 
     Draw(arena, board, sim, selected_id);
 
-    DrawGui(gui, sim, selected_id);
+    DrawGui(gui, sim, arena, selected_id);
 
     EndDrawing();
 
+    if (gui.actions.selection.is_changed) {
+      selected_id = gui.actions.selection.value;
+    }
+
     // Simulate
+    simulation::TickRequest request;
+    request.advance_time = gui.actions.next_day;
+    simulation::Tick(sim, request);
   }
 
   rlImGuiShutdown();

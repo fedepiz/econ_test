@@ -14,7 +14,6 @@ public:
     Page* next{nullptr};
   };
 private:
-
   usize capacity{0};
   Page* page_chain{};
   usize min_page_size{4096};
@@ -25,15 +24,18 @@ public:
   ~Arena();
   
   byte* AllocateBytes(usize num_bytes);
+  const char* AllocateString(const std::string& str);
+
   void Reset();
 
-  template <typename T> T* Allocate() {
-    return (T*)this->AllocateBytes(sizeof(T));
+  template <typename T, typename ...Args> T* Allocate(Args... args) {
+    auto* ptr = this->AllocateBytes(sizeof(T));
+    return new (ptr) T(args...);
   }
 };
 
 template <typename T>
-class Stream {
+class List {
 public:
   struct Chunk {
     usize length{0};
@@ -77,26 +79,30 @@ public:
 private:
   Arena* arena{nullptr};
   Head* head{nullptr};
+  usize chunk_capacity{32};
 
-  static void InitChunk(Arena& arena, Chunk& chunk) {
-      const usize CAPACITY = 64;
+  static void InitChunk(Arena& arena, Chunk& chunk, usize capacity) {
       chunk = Chunk {
         .length = 0,
-        .capacity = CAPACITY,
-        .buffer = new T[CAPACITY],
+        .capacity = capacity,
+        .buffer = new T[capacity],
         .next = nullptr,
       };
   }
 public:
-  Stream() = default;
-  Stream(Arena* arena) { this->arena = arena; }
+  List() = default;
+  List(Arena* arena) { this->arena = arena; }
+  List(Arena* arena, usize capacity) {
+    this->arena = arena;
+    this->chunk_capacity = capacity;
+  }
   
   void Push(T value) {
     if (!arena) { return; }
     if (!head) {
       // Create initial chunk
       this->head = this->arena->Allocate<Head>();
-      InitChunk(*this->arena, this->head->chunk);
+      InitChunk(*this->arena, this->head->chunk, this->chunk_capacity);
       // Initial chunk has a last, and the last is itself
       this->head->tail = &this->head->chunk;
     }
@@ -106,7 +112,7 @@ public:
     // Allocate a new last chunk, if we ran out of chunks
     if (last->length >= last->capacity) {
       auto* new_chunk = this->arena->Allocate<Chunk>();
-      InitChunk(*this->arena, *new_chunk);
+      InitChunk(*this->arena, *new_chunk, this->chunk_capacity);
       last->next = new_chunk;
       this->head->tail = new_chunk;
     }
@@ -122,7 +128,16 @@ public:
   }
 
   usize Length() const {
-    return this->head->count;
+    if (!this->head) {
+      return 0;
+    } else {
+      return this->head->count;
+    }
+    this->head->count;
+  }
+
+  bool IsEmpty() const {
+    return this->Length() == 0;
   }
 };
 } // namespace arena

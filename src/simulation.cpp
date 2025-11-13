@@ -60,16 +60,20 @@ void SetVectorValues(NumVector<T>& vector, std::vector<T>& definitions,
   }
 }
 
-
 template <typename T> unique_vector<T> MakeUniqueVec() {
   return std::make_unique<std::vector<T>>();
 }
 
 static bool IsValid(const Pop& pop) { return pop.generation % 2 == 1; }
-static bool IsValid(const Building& building) { return building.generation % 2 == 1; }
-static bool IsValid(const Location& location) { return location.generation % 2 == 1; }
-static bool IsValid(const Country& country) { return country.generation % 2 == 1; }
-
+static bool IsValid(const Building& building) {
+  return building.generation % 2 == 1;
+}
+static bool IsValid(const Location& location) {
+  return location.generation % 2 == 1;
+}
+static bool IsValid(const Country& country) {
+  return country.generation % 2 == 1;
+}
 
 const char* StringAlloc(Strings& container, std::string&& data) {
   container.push_back(std::move(data));
@@ -104,6 +108,7 @@ static inline Pop* PopInit(Sim& sim, std::string_view type_tag,
   }
 
   auto& pop = sim.pops.Allocate();
+  pop.generation += 1;
   pop.type = pop_type;
   pop.size = size;
 
@@ -112,6 +117,38 @@ static inline Pop* PopInit(Sim& sim, std::string_view type_tag,
   location->pops_at_location->push_back(&pop);
 
   return &pop;
+}
+
+static inline const BuildingType* LookupBuildingType(
+    BuildingTypes& types, std::string_view tag) {
+  auto lookup = Lookup(types, tag);
+  if (!lookup.found) {
+    std::cout << "Invalid tag for building_type'" << tag << "'" << std::endl;
+  }
+  const auto* result = &types[lookup.idx];
+  assert(result);
+  return result;
+}
+
+static inline Building* BuildingInit(Sim& sim, std::string_view type_tag, std::string_view location_tag, i64 size) {
+
+  auto* building_type = LookupBuildingType(sim.building_types, type_tag);
+  auto* location = LookupLocation(sim.locations, location_tag);
+
+  if (!location) {
+    return nullptr;
+  }
+
+  auto& building = sim.buildings.Allocate();
+  building.generation += 1;
+  building.type = building_type;
+  building.size = size;
+
+  // Add the building to the list of buildings at location
+  building.location = location;
+  location->buildings_at_location->push_back(&building);
+
+  return &building;
 }
 
 struct TagAndName {
@@ -127,7 +164,6 @@ static inline Location* LocationInit(Sim& sim, TagAndName tag_name, V2 coords) {
   location.coords = coords;
   location.pops_at_location = MakeUniqueVec<Pop*>();
   location.buildings_at_location = MakeUniqueVec<Building*>();
-
   return &location;
 }
 
@@ -208,16 +244,22 @@ static inline void InitPopTypes(Sim& sim) {
 
 static inline void InitBuildingTypes(Sim& sim) {
   auto make_type = [&sim](const char* tag, const char* name) {
-    return BuildingType{.tag = tag,
+    return BuildingType{
+        .tag = tag,
         .name = name,
         .inputs = VectorInit(sim.good_types),
         .output = VectorInit(sim.good_types)};
   };
 
   {
+    // Null building
+    sim.building_types.push_back(make_type("null_building", "NULL_BUILDING"));
+  }
+  {
     // Farm
     auto type = make_type("farm", "Farm");
     SetVectorValues(type.output, sim.good_types, {{"wheat", 2.0}});
+    sim.building_types.push_back(type);
   }
 }
 
@@ -226,7 +268,8 @@ template <typename T> static inline T& assume_valid(T* ptr) {
   return *ptr;
 }
 
-static void ChangeLocationOwner(Sim& sim, Country* country, Location* location) {
+static void ChangeLocationOwner(
+    Sim& sim, Country* country, Location* location) {
   assert(!location->owner_country);
   country->owned_locations->push_back(location);
   location->owner_country = country;
@@ -236,6 +279,7 @@ void Init(Sim& sim) {
   using namespace init_sim;
   InitGoodTypes(sim);
   InitPopTypes(sim);
+  InitBuildingTypes(sim);
 
   sim.pops = std::move(Pops("Pops", 2048));
   sim.buildings = std::move(Buildings("Buildings", 2048));
@@ -247,7 +291,7 @@ void Init(Sim& sim) {
         .tag = "italy",
         .name = "Italy",
     };
-    auto color = RGB { 40, 255, 40 };
+    auto color = RGB{40, 255, 40};
     auto* country = CountryInit(sim, tag_name, color);
     assume_valid(country);
     sim.player.country = country;
@@ -258,7 +302,7 @@ void Init(Sim& sim) {
         .tag = "rome",
         .name = "Rome",
     };
-    auto* location = LocationInit(sim, tag_name, { 0.0, 0.0 });
+    auto* location = LocationInit(sim, tag_name, {0.0, 0.0});
     assume_valid(location);
     ChangeLocationOwner(sim, sim.player.country, location);
   }
@@ -266,6 +310,7 @@ void Init(Sim& sim) {
   {
     PopInit(sim, "peasants", "rome", 200);
     PopInit(sim, "burghers", "rome", 100);
+    BuildingInit(sim, "farm", "rome", 1);
   }
 }
 
@@ -275,43 +320,129 @@ static inline void AdvanceDate(Date& date) {
   assert(date.epoch > old_date);
 }
 
-void Tick(
-    Sim& sim, const simulation::TickRequest& request) {
+void Tick(Sim& sim, const simulation::TickRequest& request) {
   if (request.advance_time) {
     AdvanceDate(sim.date);
   }
-
-  for (const auto& pop : sim.pops) {
-    if (!IsValid(pop))
-      continue;
-    std::cout << pop.type->name << "(" << pop.size << ")" << " in "
-              << pop.location->name << std::endl;
- }
 }
 
-Stream<MapItem> ViewMapItems(const Sim& sim, Arena& arena) {
-  auto stream = arena::Stream<MapItem>(&arena);
+List<MapItem> ViewMapItems(const Sim& sim, Arena& arena) {
+  auto list = arena::List<MapItem>(&arena);
 
   for (const auto& location : sim.locations) {
-    if (!IsValid(location)) { continue; }
+    if (!IsValid(location)) {
+      continue;
+    }
     MapItem item;
     if (location.owner_country) {
       item.color = location.owner_country->color;
     }
     item.id = EntityId {
-      .kind = EntityIdKind::Location,
-      .handle = (void*)&location,
-      .generation = location.generation,
+        .kind = EntityIdKind::Location,
+        .handle = (void*)&location,
+        .generation = location.generation,
     };
     item.name = location.name;
     item.coords = location.coords;
     item.size = 2.0f;
-    stream.Push(item);
+    list.Push(item);
   }
 
-  return stream;
+  return list;
 }
 
-
+static inline const char* PopString(ExtractCtx& ctx) {
+  auto string = ctx.ss.str();
+  const auto* result = ctx.arena.AllocateString(string);
+  // Clearing a stringstream, because C++ is a bit silly...
+  ctx.ss.str("");
+  ctx.ss.clear();
+  return result;
 }
 
+static inline Object* NewObject(ExtractCtx& ctx) {
+  return ctx.arena.Allocate<Object>(&ctx.arena);
+}
+
+template <typename T>
+const char*  Write(ExtractCtx& ctx, T value) {
+  ctx.ss << value;
+  return PopString(ctx);
+}
+
+static inline Object* Info(ExtractCtx& ctx, const Pop& pop) {
+  auto* obj = NewObject(ctx);
+  obj->strings.Set(Field::Name, pop.type->name.c_str());
+  obj->strings.Set(Field::Size, Write(ctx, pop.size));
+  return obj;
+}
+
+static inline Object* Info(ExtractCtx& ctx, const Building& building) {
+  auto* obj = NewObject(ctx);
+  obj->id = EntityId {
+    .kind = EntityIdKind::Building,
+    .generation = building.generation,
+    .handle = (&building)
+  };
+  obj->strings.Set(Field::Name, building.type->name.c_str());
+  obj->strings.Set(Field::Size, Write(ctx, building.size));
+  return obj;
+}
+
+static inline void Extract(
+    ExtractCtx& ctx, Object& obj, const Location& location) {
+  obj.strings.Set(Field::Name, location.name);
+
+  {
+    auto* name = "No country";
+    if (auto* country = location.owner_country) {
+      obj.strings.Set(Field::Country, country->name);
+    }
+  }
+
+  // Pops
+  {
+    auto list = List<Object*>(&ctx.arena);
+    for (const auto* pop : *location.pops_at_location) {
+      list.Push(Info(ctx, *pop));
+    }
+    obj.lists.Set(Field::Pops, list);
+  }
+
+  {
+    // Buildings
+    auto list = List<Object*>(&ctx.arena);
+    for (const auto* item : *location.buildings_at_location) {
+      list.Push(Info(ctx, *item));
+    }
+    obj.lists.Set(Field::Buildings, list);
+  }
+}
+
+static inline
+void Extract(ExtractCtx& ctx, Object& obj, const Building& building) {
+  obj.strings.Set(Field::Name, building.type->name.c_str());
+  obj.strings.Set(Field::Size, Write(ctx, building.size));
+}
+
+Object* Extract(ExtractCtx& ctx, EntityId id) {
+  Object* obj = NewObject(ctx);
+  obj->id = id;
+  if (!id.IsValid()) {
+    obj->strings.Set(Field::Name, "INVALID");
+    return obj;
+  }
+
+  switch (id.kind) {
+  case EntityIdKind::Location:
+    Extract(ctx, *obj, *(Location*)id.handle);
+    break;
+  case EntityIdKind::Building:
+    Extract(ctx, *obj, *(Building*)id.handle);
+    break;
+  case EntityIdKind::INVALID:
+    break;
+  }
+  return obj;
+}
+} // namespace simulation

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <arena.h>
 #include <cstring>
+#include <string>
 namespace arena {
 
 using Page = Arena::Page;
@@ -47,6 +48,13 @@ void Arena::Reset() {
   }
   this->capacity = 0;
   this->page_chain = nullptr;
+}
+
+const char* Arena::AllocateString(const std::string& str) {
+  usize size = str.length() + 1;
+  char* out = (char*)this->AllocateBytes(size);
+  strcpy(out, str.c_str());
+  return out;
 }
 
 Arena::~Arena() {
